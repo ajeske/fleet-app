@@ -1,6 +1,15 @@
 # Fleet App
 
-A full-stack fleet management app for browsing vehicle categories and managing vehicles (list + create) by subcategory.
+## Features
+
+- Browse vehicle categories and subcategories (trucks, vans, cars)
+- List vehicles filtered by subcategory
+- Add a vehicle with license plate, make, model, and status
+- Statuses: `Active`, `Maintenance`, `Retired`, `Out of Service`
+
+## Overview
+
+Fleet App is a small full-stack fleet manager. On the left you pick a vehicle subcategory (for example Heavy Duty trucks or Cargo vans); on the right you see the vehicles in that group and can add new ones with a license plate, make, model, and status. Category labels live in the React frontend; vehicle records are stored in SQLite and served by a FastAPI backend.
 
 ## Tech stack
 
@@ -423,13 +432,6 @@ flowchart LR
 ```
 
 **Production note:** Prefer a reverse proxy (nginx, Caddy, cloud gateway) or same-origin hosting instead of exposing `localhost` URLs. Set `VITE_API_URL` (or bake the public API base at build time) to your real API origin when you are not serving `/api` from the same host as the SPA.
-
-## Features
-
-- Browse vehicle categories and subcategories (trucks, vans, cars)
-- List vehicles filtered by subcategory
-- Add a vehicle with license plate, make, model, and status
-- Statuses: `Active`, `Maintenance`, `Retired`, `Out of Service`
 
 ## Project structure
 
