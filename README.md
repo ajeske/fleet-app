@@ -291,6 +291,139 @@ flowchart LR
   E -.-> R
 ```
 
+## Vite proxy (development)
+
+During local development the React app runs on **port 5173** and the FastAPI API on **port 8000**. Browsers treat those as different origins. This project uses Vite’s **dev-server proxy** so the frontend can call the API with same-origin relative URLs (`/api/...`) while Vite forwards those requests to the backend.
+
+### How it is configured
+
+**1. Vite proxy** — `frontend/vite.config.js`:
+
+```js
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8000',
+    },
+  },
+})
+```
+
+Any request from the browser to `http://localhost:5173/api/...` is forwarded by the Vite process to `http://localhost:8000/api/...`. The path is preserved; only the host/port change.
+
+**2. API client default base URL** — `frontend/src/api/vehicles.js`:
+
+```js
+const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
+```
+
+With no env override, calls look like `fetch('/api/vehicles')`. That hits the Vite origin, so the proxy applies. Paths after `/api` (for example `/vehicles`) are appended by the client helpers.
+
+**3. Backend routes** — FastAPI mounts the vehicles router under `/api`:
+
+```python
+app.include_router(vehicles.router, prefix="/api")
+# → GET/POST /api/vehicles
+```
+
+So the path the browser uses (`/api/vehicles`) matches the path FastAPI serves after the proxy rewrite.
+
+```mermaid
+flowchart LR
+  Browser["Browser\norigin: localhost:5173"]
+  Vite["Vite dev server :5173"]
+  API["FastAPI :8000"]
+
+  Browser -->|"1. GET /api/vehicles\n(same origin)"| Vite
+  Vite -->|"2. proxy forward\nGET http://localhost:8000/api/vehicles"| API
+  API -->|"3. JSON response"| Vite
+  Vite -->|"4. response to browser"| Browser
+```
+
+### Why this helps in development
+
+| Benefit | What it means in practice |
+| --- | --- |
+| Avoids CORS for day-to-day UI work | The browser only talks to `:5173`. Cross-origin checks do not apply to the proxied hop (Vite → FastAPI is server-to-server). |
+| Simple relative URLs | The client uses `/api` instead of hard-coding `http://localhost:8000` in every call. |
+| Matches a common production shape | Many deployments serve the SPA and API under one public origin (or a gateway). Relative `/api` paths stay valid when you later put a reverse proxy in front. |
+| One mental model while coding | Open the app at `:5173`; API traffic still goes through that origin. Backend stays on `:8000` for docs (`/docs`) and direct testing. |
+| Easy to override later | `VITE_API_URL` can point somewhere else without changing call sites. |
+
+**Note:** CORS is still configured on FastAPI (`allow_origins=["http://localhost:5173"]`) so direct browser calls to `:8000` (or a no-proxy setup below) can work. With the proxy, that CORS policy is usually unused for the SPA’s `/api` fetches.
+
+### Running without the Vite proxy
+
+Use this when you want the browser to call FastAPI **directly** (different origin), for example to debug CORS, hit a remote API, or drop the proxy entirely.
+
+**1. Point the API client at the backend**
+
+Create `frontend/.env.local` (gitignored if you add `.env*` patterns; otherwise keep secrets out of commits):
+
+```bash
+# frontend/.env.local
+VITE_API_URL=http://localhost:8000/api
+```
+
+Restart `npm run dev` after changing env files. Vite only reads `VITE_*` vars at startup.
+
+The client already supports this via:
+
+```js
+const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
+```
+
+Requests become `http://localhost:8000/api/vehicles` instead of `/api/vehicles`.
+
+**2. Keep backend CORS aligned with the UI origin**
+
+In `backend/app/main.py`, `CORSMiddleware` must allow the frontend origin:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+If the UI is served from another host/port, add that origin to `allow_origins` (or temporarily use a broader list only for local debugging).
+
+**3. Optionally remove or disable the Vite proxy**
+
+In `frontend/vite.config.js`, delete the `server.proxy` block (or leave it; unused if the client never calls `/api` on `:5173`):
+
+```js
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  // no server.proxy — browser talks to FastAPI directly
+})
+```
+
+**4. Checklist**
+
+| Step | Action |
+| --- | --- |
+| Env | Set `VITE_API_URL=http://localhost:8000/api` |
+| Restart | Restart Vite after env changes |
+| CORS | Ensure FastAPI allows `http://localhost:5173` |
+| Proxy | Optional: remove `server.proxy` from `vite.config.js` |
+| Verify | Network tab should show requests to `:8000`, not only `:5173/api` |
+
+```mermaid
+flowchart LR
+  Browser["Browser\norigin: localhost:5173"]
+  API["FastAPI :8000"]
+
+  Browser -->|"GET http://localhost:8000/api/vehicles\n(cross-origin + CORS)"| API
+  API -->|"Access-Control-Allow-Origin\n+ JSON"| Browser
+```
+
+**Production note:** Prefer a reverse proxy (nginx, Caddy, cloud gateway) or same-origin hosting instead of exposing `localhost` URLs. Set `VITE_API_URL` (or bake the public API base at build time) to your real API origin when you are not serving `/api` from the same host as the SPA.
+
 ## Features
 
 - Browse vehicle categories and subcategories (trucks, vans, cars)
@@ -359,7 +492,7 @@ npm run dev
 
 App: [http://localhost:5173](http://localhost:5173)
 
-Vite proxies `/api` requests to the backend on port `8000`.
+By default, Vite proxies `/api` to the backend on port `8000`. See [Vite proxy (development)](#vite-proxy-development) for how that works, why it helps, and how to call the API directly without the proxy.
 
 ## API overview
 
