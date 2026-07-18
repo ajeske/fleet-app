@@ -13,86 +13,282 @@ A full-stack fleet management app for browsing vehicle categories and managing v
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  Browser["Browser"]
+### 1. System overview (runtime)
 
-  subgraph Frontend["Frontend — localhost:5173"]
-    React["React 19"]
-    Vite["Vite 8"]
-    Tailwind["Tailwind CSS 4"]
-    ApiClient["api/vehicles.js"]
-  end
-
-  subgraph Backend["Backend — localhost:8000"]
-    FastAPI["FastAPI"]
-    Uvicorn["Uvicorn"]
-    Pydantic["Pydantic schemas"]
-    SQLAlchemy["SQLAlchemy ORM"]
-  end
-
-  subgraph Data["Data"]
-    SQLite[("SQLite\nbackend/data/fleet.db")]
-  end
-
-  Browser --> React
-  React --> Vite
-  React --> Tailwind
-  React --> ApiClient
-  ApiClient -->|"HTTP /api (Vite proxy)"| FastAPI
-  FastAPI --> Uvicorn
-  FastAPI --> Pydantic
-  FastAPI --> SQLAlchemy
-  SQLAlchemy --> SQLite
-```
-
-### Request flow
-
-```mermaid
-sequenceDiagram
-  participant UI as React UI
-  participant Vite as Vite Dev Server
-  participant API as FastAPI
-  participant ORM as SQLAlchemy
-  participant DB as SQLite
-
-  UI->>Vite: fetch /api/vehicles?subcategoryId=...
-  Vite->>API: proxy → http://localhost:8000/api/vehicles
-  API->>ORM: query / insert Vehicle
-  ORM->>DB: SQL
-  DB-->>ORM: rows
-  ORM-->>API: Vehicle models
-  API-->>UI: JSON (camelCase aliases)
-```
-
-### Technology layers
+How the pieces talk to each other while developing locally.
 
 ```mermaid
 flowchart TB
-  subgraph Client
-    A["React components\nApp · Sidebar · VehiclePanel"]
-    B["Static category data\nfleetData.js"]
-    C["API client\nfetchVehicles · createVehicle"]
+  User(["User"])
+
+  subgraph Browser["Browser"]
+    SPA["React SPA\nUI + client state"]
   end
 
-  subgraph Server
-    D["FastAPI app\nCORS · /health · /api router"]
-    E["Vehicles router\nGET/POST /api/vehicles"]
-    F["Pydantic models\nVehicleCreate · VehicleRead"]
-    G["SQLAlchemy model\nVehicle"]
+  subgraph FE["Frontend process — :5173"]
+    Vite["Vite 8\ndev server + HMR"]
+    Proxy["/api proxy\n→ localhost:8000"]
+    Tailwind["Tailwind CSS 4\n@tailwindcss/vite"]
   end
 
-  subgraph Persistence
-    H[("SQLite fleet.db")]
+  subgraph BE["Backend process — :8000"]
+    Uvicorn["Uvicorn\nASGI server --reload"]
+    FastAPI["FastAPI app\nFleet Manager API"]
+    CORS["CORSMiddleware\nallow localhost:5173"]
   end
 
-  A --> B
-  A --> C
-  C --> D
-  D --> E
-  E --> F
-  E --> G
-  G --> H
+  subgraph Persist["Persistence"]
+    SQLite[("SQLite\nbackend/data/fleet.db")]
+  end
+
+  User --> SPA
+  SPA -->|"static assets / HMR"| Vite
+  SPA -->|"fetch('/api/...')"| Proxy
+  Proxy -->|"HTTP JSON"| Uvicorn
+  Uvicorn --> FastAPI
+  FastAPI --> CORS
+  FastAPI -->|"SQLAlchemy"| SQLite
+  Tailwind -.->|"styles"| SPA
+```
+
+### 2. Frontend component & state architecture
+
+```mermaid
+flowchart TB
+  subgraph Entry["Bootstrap"]
+    Main["main.jsx"]
+    IndexCSS["index.css\nTailwind"]
+    App["App.jsx\nstate owner"]
+  end
+
+  subgraph UI["UI components"]
+    Sidebar["Sidebar.jsx\ncategories · expand/collapse\nselected subcategory"]
+    Panel["VehiclePanel.jsx\nlist · add form · status badges"]
+  end
+
+  subgraph LocalData["Frontend-only data"]
+    FleetData["fleetData.js\ncategories taxonomy\nvehicleStatuses"]
+  end
+
+  subgraph ApiLayer["API layer"]
+    VehiclesApi["api/vehicles.js\nfetchVehicles()\ncreateVehicle()"]
+  end
+
+  Main --> App
+  Main --> IndexCSS
+  App -->|"categories, selection"| Sidebar
+  App -->|"vehicles, loading, error, saving"| Panel
+  App --> FleetData
+  App -->|"on subcategory change / add"| VehiclesApi
+  Panel -->|"onAddVehicle(form)"| App
+  Sidebar -->|"onSelectSubcategory(id)"| App
+```
+
+**State held in `App.jsx`:**
+
+| State | Role |
+| --- | --- |
+| `selectedSubcategoryId` | Drives which vehicles to load |
+| `vehicles` | Current list from the API |
+| `loading` / `error` / `saving` | UX for fetch and create |
+
+Categories stay in `fleetData.js` (static). Vehicles live in SQLite via the API.
+
+### 3. Backend layered architecture
+
+```mermaid
+flowchart TB
+  subgraph Transport["Transport"]
+    Uvicorn["Uvicorn ASGI"]
+  end
+
+  subgraph AppLayer["app/main.py"]
+    FastAPIApp["FastAPI(title='Fleet Manager API')"]
+    CORS["CORSMiddleware"]
+    Health["GET /health"]
+    Mount["include_router(..., prefix='/api')"]
+    CreateAll["Base.metadata.create_all()"]
+  end
+
+  subgraph RouterLayer["app/routers/vehicles.py"]
+    List["GET /api/vehicles\n?subcategoryId="]
+    Create["POST /api/vehicles\n201 + VehicleRead"]
+    Validate["status whitelist\nrequired field checks"]
+  end
+
+  subgraph SchemaLayer["app/schemas.py — Pydantic"]
+    VCreate["VehicleCreate\ncamelCase aliases in"]
+    VRead["VehicleRead\ncamelCase aliases out"]
+  end
+
+  subgraph OrmLayer["ORM"]
+    Model["models.py — Vehicle"]
+    Db["database.py\nengine · SessionLocal · get_db()"]
+  end
+
+  subgraph Store["Store"]
+    SQLite[("fleet.db\ntable: vehicles")]
+  end
+
+  Uvicorn --> FastAPIApp
+  FastAPIApp --> CORS
+  FastAPIApp --> Health
+  FastAPIApp --> Mount
+  FastAPIApp --> CreateAll
+  Mount --> List
+  Mount --> Create
+  List --> VRead
+  Create --> VCreate
+  Create --> Validate
+  Create --> VRead
+  List --> Model
+  Create --> Model
+  List --> Db
+  Create --> Db
+  Model --> Db
+  Db --> SQLite
+  CreateAll --> SQLite
+```
+
+### 4. Data model
+
+Categories exist only on the frontend. The database stores vehicles keyed by `subcategory_id`.
+
+```mermaid
+erDiagram
+  VEHICLES {
+    string id PK "UUID"
+    string subcategory_id "e.g. trucks-heavy"
+    string license_plate
+    string make
+    string model
+    string status "Active | Maintenance | Retired | Out of Service"
+  }
+```
+
+```mermaid
+flowchart LR
+  subgraph FrontendTaxonomy["fleetData.js taxonomy"]
+    Trucks["Trucks"]
+    Vans["Vans"]
+    Cars["Cars"]
+    TH["trucks-heavy"]
+    TL["trucks-light"]
+    VC["vans-cargo"]
+    VP["vans-passenger"]
+    CS["cars-sedan"]
+    CU["cars-suv"]
+    Trucks --> TH
+    Trucks --> TL
+    Vans --> VC
+    Vans --> VP
+    Cars --> CS
+    Cars --> CU
+  end
+
+  subgraph DB["SQLite vehicles.subcategory_id"]
+    Rows["Vehicle rows filter by subcategory_id"]
+  end
+
+  TH -.-> Rows
+  VC -.-> Rows
+```
+
+### 5. Sequence: list vehicles
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Sidebar
+  participant App as App.jsx
+  participant Api as api/vehicles.js
+  participant Vite as Vite proxy :5173
+  participant FastAPI as FastAPI :8000
+  participant Router as vehicles router
+  participant Schema as VehicleRead
+  participant DB as SQLite
+
+  User->>Sidebar: select subcategory
+  Sidebar->>App: onSelectSubcategory(id)
+  App->>App: setLoading(true)
+  App->>Api: fetchVehicles(subcategoryId)
+  Api->>Vite: GET /api/vehicles?subcategoryId=...
+  Vite->>FastAPI: proxy GET /api/vehicles?...
+  FastAPI->>Router: list_vehicles(Depends get_db)
+  Router->>DB: SELECT * FROM vehicles\nWHERE subcategory_id = ?\nORDER BY license_plate
+  DB-->>Router: rows
+  Router->>Schema: serialize → camelCase JSON
+  Schema-->>Api: [{ id, subcategoryId, licensePlate, ... }]
+  Api-->>App: data
+  App->>App: setVehicles(data) · setLoading(false)
+  App-->>User: VehiclePanel table updates
+```
+
+### 6. Sequence: create vehicle
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Panel as VehiclePanel
+  participant App as App.jsx
+  participant Api as api/vehicles.js
+  participant Vite as Vite proxy
+  participant FastAPI as FastAPI
+  participant Router as vehicles router
+  participant Schema as VehicleCreate / VehicleRead
+  participant DB as SQLite
+
+  User->>Panel: fill form · Save
+  Panel->>App: onAddVehicle(form)
+  App->>App: setSaving(true)
+  App->>Api: createVehicle({ subcategoryId, ...form })
+  Api->>Vite: POST /api/vehicles JSON
+  Vite->>FastAPI: proxy POST
+  FastAPI->>Schema: parse body (aliases → snake_case)
+  Schema->>Router: VehicleCreate payload
+  Router->>Router: validate status + required fields
+  Router->>DB: INSERT vehicle (uuid id)
+  DB-->>Router: committed row
+  Router->>Schema: VehicleRead response
+  Schema-->>Api: created vehicle JSON
+  Api-->>App: created
+  App->>App: append to vehicles · setSaving(false)
+  App-->>User: new row in table
+```
+
+### 7. Tech map by concern
+
+```mermaid
+flowchart LR
+  subgraph Presentation["Presentation"]
+    R["React 19"]
+    T["Tailwind CSS 4"]
+  end
+
+  subgraph Tooling["Build / DX"]
+    V["Vite 8"]
+    E["ESLint"]
+    UV["Uvicorn --reload"]
+  end
+
+  subgraph API["HTTP API"]
+    F["FastAPI"]
+    P["Pydantic v2"]
+  end
+
+  subgraph DataAccess["Data access"]
+    S["SQLAlchemy 2"]
+    Q[("SQLite")]
+  end
+
+  R --> V
+  R --> T
+  V -->|"/api proxy"| F
+  F --> P
+  F --> S
+  S --> Q
+  UV --> F
+  E -.-> R
 ```
 
 ## Features
