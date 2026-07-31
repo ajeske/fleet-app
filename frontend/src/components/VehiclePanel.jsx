@@ -1,18 +1,17 @@
-import { useState } from 'react'
-import { vehicleStatuses } from '../data/fleetData'
+import { useEffect, useState } from 'react'
 
-const emptyForm = { licensePlate: '', make: '', model: '', status: 'Active' }
+const emptyForm = { licensePlate: '', make: '', model: '' }
 
 function StatusBadge({ status }) {
   const styles = {
     Active: 'bg-green-100 text-green-800',
     Maintenance: 'bg-amber-100 text-amber-800',
-    Retired: 'bg-slate-100 text-slate-600',
-    'Out of Service': 'bg-red-100 text-red-800',
+    Inactive: 'bg-slate-100 text-slate-600',
+    Sold: 'bg-red-100 text-red-800',
   }
 
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] ?? styles.Retired}`}>
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] ?? styles.Inactive}`}>
       {status}
     </span>
   )
@@ -25,9 +24,16 @@ export default function VehiclePanel({
   error,
   saving,
   onAddVehicle,
+  onViewCar,
+  startWithFormOpen = false,
 }) {
   const [form, setForm] = useState(emptyForm)
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(startWithFormOpen)
+
+  useEffect(() => {
+    setShowForm(startWithFormOpen)
+    setForm(emptyForm)
+  }, [title, startWithFormOpen])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -43,14 +49,14 @@ export default function VehiclePanel({
       <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          <p className="text-sm text-slate-500">{vehicles.length} vehicle(s)</p>
+          <p className="text-sm text-slate-500">{vehicles.length} car(s)</p>
         </div>
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
           className="rounded-md bg-purple-700 px-3 py-2 text-sm font-medium text-white hover:bg-purple-800"
         >
-          {showForm ? 'Cancel' : 'Add vehicle'}
+          {showForm ? 'Cancel' : 'Add car'}
         </button>
       </header>
 
@@ -62,7 +68,7 @@ export default function VehiclePanel({
 
       {showForm && (
         <form onSubmit={handleSubmit} className="border-b border-slate-200 bg-slate-50 px-6 py-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-3">
             {[
               ['licensePlate', 'License plate'],
               ['make', 'Make'],
@@ -77,19 +83,6 @@ export default function VehiclePanel({
                 />
               </label>
             ))}
-
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600">Status</span>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
-              >
-                {vehicleStatuses.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </label>
           </div>
 
           <button
@@ -97,17 +90,17 @@ export default function VehiclePanel({
             disabled={saving}
             className="mt-3 rounded-md bg-purple-700 px-4 py-2 text-sm font-medium text-white hover:bg-purple-800 disabled:opacity-60"
           >
-            {saving ? 'Saving...' : 'Save vehicle'}
+            {saving ? 'Saving...' : 'Save car'}
           </button>
         </form>
       )}
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
-          <div className="text-sm text-slate-500">Loading vehicles...</div>
+          <div className="text-sm text-slate-500">Loading cars...</div>
         ) : vehicles.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-            No vehicles in this category yet. Click “Add vehicle” to create one.
+            No cars with this status yet. Click “Add car” to create one.
           </div>
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200">
@@ -118,6 +111,7 @@ export default function VehiclePanel({
                   <th className="px-4 py-3 font-medium">Make</th>
                   <th className="px-4 py-3 font-medium">Model</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -127,6 +121,15 @@ export default function VehiclePanel({
                     <td className="px-4 py-3">{vehicle.make}</td>
                     <td className="px-4 py-3">{vehicle.model}</td>
                     <td className="px-4 py-3"><StatusBadge status={vehicle.status} /></td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => onViewCar?.(vehicle.id)}
+                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        View Car
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

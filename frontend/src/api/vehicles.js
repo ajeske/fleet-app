@@ -14,14 +14,25 @@ async function request(path, options = {}) {
   return res.status === 204 ? null : res.json()
 }
 
-export function fetchVehicles(subcategoryId) {
-  const query = subcategoryId ? `?subcategoryId=${encodeURIComponent(subcategoryId)}` : ''
+export function fetchVehicles(status) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
   return request(`/vehicles${query}`)
+}
+
+export function fetchVehicle(id) {
+  return request(`/vehicles/${encodeURIComponent(id)}`)
 }
 
 export function createVehicle(payload) {
   return request('/vehicles', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateVehicle(id, payload) {
+  return request(`/vehicles/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   })
 }
