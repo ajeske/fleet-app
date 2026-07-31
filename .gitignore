@@ -13,3 +13,5 @@ build/
 # Data / local
 *.db
 .DS_Store
+backend/data/uploads/**
+!backend/data/uploads/**/.gitkeep

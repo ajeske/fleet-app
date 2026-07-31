@@ -2,14 +2,14 @@
 
 ## Features
 
-- Browse vehicle categories and subcategories (trucks, vans, cars)
-- List vehicles filtered by subcategory
-- Add a vehicle with license plate, make, model, and status
-- Statuses: `Active`, `Maintenance`, `Retired`, `Out of Service`
+- Browse cars by status in a flat sidebar (`Active`, `Maintenance`, `Inactive`, `Sold`)
+- List cars filtered by the selected status
+- Add a car with license plate, make, and model (status comes from the sidebar selection)
+- Open a car profile (**View Car**) with tabs: Basic, Accidents (PDF upload), Maintenance, Payments history, Insurance
 
 ## Overview
 
-Fleet App is a small full-stack fleet manager. On the left you pick a vehicle subcategory (for example Heavy Duty trucks or Cargo vans); on the right you see the vehicles in that group and can add new ones with a license plate, make, model, and status. Category labels live in the React frontend; vehicle records are stored in SQLite and served by a FastAPI backend.
+Fleet App is a small full-stack fleet manager for cars. On the left you pick a status bucket; on the right you see cars with that status and can add new ones. **View Car** replaces the right panel with a resume-style profile (photo URL or placeholder, identity fields, kilometers, notes) while the sidebar stays. All vehicles are cars — there is no truck/van/type taxonomy. Status labels live in the React frontend; car records are stored in SQLite and served by a FastAPI backend.
 
 ## Tech stack
 
@@ -71,37 +71,43 @@ flowchart TB
   end
 
   subgraph UI["UI components"]
-    Sidebar["Sidebar.jsx\ncategories · expand/collapse\nselected subcategory"]
-    Panel["VehiclePanel.jsx\nlist · add form · status badges"]
+    Sidebar["Sidebar.jsx\nflat status list\nselected status"]
+    Panel["VehiclePanel.jsx\nlist · add · View Car"]
+    Detail["CarDetailPanel.jsx\nresume profile · edit"]
+    Welcome["WelcomePanel.jsx"]
   end
 
   subgraph LocalData["Frontend-only data"]
-    FleetData["fleetData.js\ncategories taxonomy\nvehicleStatuses"]
+    FleetData["fleetData.js\nvehicleStatuses"]
   end
 
   subgraph ApiLayer["API layer"]
-    VehiclesApi["api/vehicles.js\nfetchVehicles()\ncreateVehicle()"]
+    VehiclesApi["api/vehicles.js\nfetchVehicles · createVehicle\nfetchVehicle · updateVehicle"]
   end
 
   Main --> App
   Main --> IndexCSS
-  App -->|"categories, selection"| Sidebar
-  App -->|"vehicles, loading, error, saving"| Panel
+  App -->|"statuses, selection"| Sidebar
+  App -->|"list or detail or welcome"| Panel
+  App --> Detail
+  App --> Welcome
   App --> FleetData
-  App -->|"on subcategory change / add"| VehiclesApi
-  Panel -->|"onAddVehicle(form)"| App
-  Sidebar -->|"onSelectSubcategory(id)"| App
+  App -->|"on status change / add / view"| VehiclesApi
+  Panel -->|"onAddVehicle · onViewCar"| App
+  Detail -->|"onBack · onSaved"| App
+  Sidebar -->|"onSelectStatus(status)"| App
 ```
 
 **State held in `App.jsx`:**
 
 | State | Role |
 | --- | --- |
-| `selectedSubcategoryId` | Drives which vehicles to load |
+| `selectedStatus` | Drives which cars to load (null = welcome) |
+| `selectedVehicleId` | When set, right panel shows car profile |
 | `vehicles` | Current list from the API |
 | `loading` / `error` / `saving` | UX for fetch and create |
 
-Categories stay in `fleetData.js` (static). Vehicles live in SQLite via the API.
+Statuses stay in `fleetData.js` (static). Cars live in SQLite via the API.
 
 ### 3. Backend layered architecture
 
@@ -120,14 +126,17 @@ flowchart TB
   end
 
   subgraph RouterLayer["app/routers/vehicles.py"]
-    List["GET /api/vehicles\n?subcategoryId="]
+    List["GET /api/vehicles\n?status="]
+    GetOne["GET /api/vehicles/{id}"]
     Create["POST /api/vehicles\n201 + VehicleRead"]
+    Update["PATCH /api/vehicles/{id}"]
     Validate["status whitelist\nrequired field checks"]
   end
 
   subgraph SchemaLayer["app/schemas.py — Pydantic"]
-    VCreate["VehicleCreate\ncamelCase aliases in"]
-    VRead["VehicleRead\ncamelCase aliases out"]
+    VCreate["VehicleCreate"]
+    VUpdate["VehicleUpdate"]
+    VRead["VehicleRead"]
   end
 
   subgraph OrmLayer["ORM"]
@@ -145,15 +154,25 @@ flowchart TB
   FastAPIApp --> Mount
   FastAPIApp --> CreateAll
   Mount --> List
+  Mount --> GetOne
   Mount --> Create
+  Mount --> Update
   List --> VRead
+  GetOne --> VRead
   Create --> VCreate
   Create --> Validate
   Create --> VRead
+  Update --> VUpdate
+  Update --> Validate
+  Update --> VRead
   List --> Model
+  GetOne --> Model
   Create --> Model
+  Update --> Model
   List --> Db
+  GetOne --> Db
   Create --> Db
+  Update --> Db
   Model --> Db
   Db --> SQLite
   CreateAll --> SQLite
@@ -161,49 +180,45 @@ flowchart TB
 
 ### 4. Data model
 
-Categories exist only on the frontend. The database stores vehicles keyed by `subcategory_id`.
+Statuses for the sidebar live in the frontend (`vehicleStatuses`). The database stores cars and filters them by `status`.
 
 ```mermaid
 erDiagram
   VEHICLES {
     string id PK "UUID"
-    string subcategory_id "e.g. trucks-heavy"
     string license_plate
     string make
     string model
-    string status "Active | Maintenance | Retired | Out of Service"
+    string status "Active | Maintenance | Inactive | Sold"
+    string image_url "optional photo URL"
+    int kilometers
+    int year "optional"
+    string color "optional"
+    string vin "optional"
+    string notes "optional"
   }
 ```
 
 ```mermaid
 flowchart LR
-  subgraph FrontendTaxonomy["fleetData.js taxonomy"]
-    Trucks["Trucks"]
-    Vans["Vans"]
-    Cars["Cars"]
-    TH["trucks-heavy"]
-    TL["trucks-light"]
-    VC["vans-cargo"]
-    VP["vans-passenger"]
-    CS["cars-sedan"]
-    CU["cars-suv"]
-    Trucks --> TH
-    Trucks --> TL
-    Vans --> VC
-    Vans --> VP
-    Cars --> CS
-    Cars --> CU
+  subgraph FrontendStatuses["fleetData.js"]
+    Active["Active"]
+    Maint["Maintenance"]
+    Inactive["Inactive"]
+    Sold["Sold"]
   end
 
-  subgraph DB["SQLite vehicles.subcategory_id"]
-    Rows["Vehicle rows filter by subcategory_id"]
+  subgraph DB["SQLite vehicles.status"]
+    Rows["Car rows filter by status"]
   end
 
-  TH -.-> Rows
-  VC -.-> Rows
+  Active -.-> Rows
+  Maint -.-> Rows
+  Inactive -.-> Rows
+  Sold -.-> Rows
 ```
 
-### 5. Sequence: list vehicles
+### 5. Sequence: list cars
 
 ```mermaid
 sequenceDiagram
@@ -217,23 +232,23 @@ sequenceDiagram
   participant Schema as VehicleRead
   participant DB as SQLite
 
-  User->>Sidebar: select subcategory
-  Sidebar->>App: onSelectSubcategory(id)
+  User->>Sidebar: select status
+  Sidebar->>App: onSelectStatus(status)
   App->>App: setLoading(true)
-  App->>Api: fetchVehicles(subcategoryId)
-  Api->>Vite: GET /api/vehicles?subcategoryId=...
+  App->>Api: fetchVehicles(status)
+  Api->>Vite: GET /api/vehicles?status=...
   Vite->>FastAPI: proxy GET /api/vehicles?...
   FastAPI->>Router: list_vehicles(Depends get_db)
-  Router->>DB: SELECT * FROM vehicles\nWHERE subcategory_id = ?\nORDER BY license_plate
+  Router->>DB: SELECT * FROM vehicles\nWHERE status = ?\nORDER BY license_plate
   DB-->>Router: rows
   Router->>Schema: serialize → camelCase JSON
-  Schema-->>Api: [{ id, subcategoryId, licensePlate, ... }]
+  Schema-->>Api: [{ id, licensePlate, make, model, status }]
   Api-->>App: data
   App->>App: setVehicles(data) · setLoading(false)
   App-->>User: VehiclePanel table updates
 ```
 
-### 6. Sequence: create vehicle
+### 6. Sequence: create car
 
 ```mermaid
 sequenceDiagram
@@ -250,7 +265,7 @@ sequenceDiagram
   User->>Panel: fill form · Save
   Panel->>App: onAddVehicle(form)
   App->>App: setSaving(true)
-  App->>Api: createVehicle({ subcategoryId, ...form })
+  App->>Api: createVehicle({ ...form, status: selectedStatus })
   Api->>Vite: POST /api/vehicles JSON
   Vite->>FastAPI: proxy POST
   FastAPI->>Schema: parse body (aliases → snake_case)
@@ -440,8 +455,8 @@ fleet-app/
 ├── frontend/                 # React + Vite UI
 │   ├── src/
 │   │   ├── api/vehicles.js   # API client
-│   │   ├── components/       # Sidebar, VehiclePanel
-│   │   ├── data/fleetData.js # Category taxonomy
+│   │   ├── components/       # Sidebar, VehiclePanel, WelcomePanel, CarDetailPanel
+│   │   ├── data/fleetData.js # Status list
 │   │   └── App.jsx
 │   └── vite.config.js        # Proxies /api → :8000
 └── backend/                  # FastAPI API
@@ -501,17 +516,39 @@ By default, Vite proxies `/api` to the backend on port `8000`. See [Vite proxy (
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/health` | Health check |
-| `GET` | `/api/vehicles?subcategoryId=` | List vehicles (optional filter) |
-| `POST` | `/api/vehicles` | Create a vehicle |
+| `GET` | `/api/vehicles?status=` | List cars (optional status filter) |
+| `GET` | `/api/vehicles/{id}` | Get one car (profile) |
+| `POST` | `/api/vehicles` | Create a car |
+| `PATCH` | `/api/vehicles/{id}` | Update car profile fields |
+| `GET/POST` | `/api/vehicles/{id}/accidents` | List / create accidents (PDF via multipart) |
+| `DELETE` | `/api/vehicles/{id}/accidents/{accidentId}` | Delete accident |
+| `GET/POST` | `/api/vehicles/{id}/maintenance` | List / create maintenance records |
+| `GET/POST` | `/api/vehicles/{id}/payments` | List / create insurance-related payments |
+| `GET/POST` | `/api/vehicles/{id}/insurance` | List / create insurance policies |
+
+Uploaded accident PDFs are stored under `backend/data/uploads/accidents/` and served at `/uploads/...` (Vite proxies `/uploads` in development).
 
 Example create body:
 
 ```json
 {
-  "subcategoryId": "trucks-heavy",
   "licensePlate": "TX-4821",
   "make": "Ford",
   "model": "F-350",
+  "status": "Active"
+}
+```
+
+Example patch body (all fields optional):
+
+```json
+{
+  "kilometers": 50000,
+  "imageUrl": "https://example.com/car.jpg",
+  "year": 2021,
+  "color": "White",
+  "vin": "1FT8W3BT5MED12345",
+  "notes": "Primary work truck.",
   "status": "Active"
 }
 ```

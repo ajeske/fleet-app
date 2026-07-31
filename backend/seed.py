@@ -1,27 +1,38 @@
 import uuid
 
-from app.database import SessionLocal
+from app.database import Base, SessionLocal, engine
 from app.models import Vehicle
 
 SEED = [
     {
-        "subcategory_id": "trucks-heavy",
         "license_plate": "TX-4821",
         "make": "Ford",
         "model": "F-350",
         "status": "Active",
+        "kilometers": 48200,
+        "year": 2021,
+        "color": "White",
+        "vin": "1FT8W3BT5MED12345",
+        "notes": "Primary work truck.",
+        "image_url": None,
     },
     {
-        "subcategory_id": "vans-cargo",
         "license_plate": "CA-9910",
         "make": "Mercedes",
         "model": "Sprinter",
         "status": "Maintenance",
+        "kilometers": 91500,
+        "year": 2019,
+        "color": "Silver",
+        "vin": "WD3PE7CD5KP123456",
+        "notes": "Awaiting brake service.",
+        "image_url": None,
     },
 ]
 
 
 def main():
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         if db.query(Vehicle).count() > 0:
