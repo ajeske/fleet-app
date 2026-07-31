@@ -11,6 +11,20 @@
 
 Fleet App is a small full-stack fleet manager for cars. On the left you pick a status bucket; on the right you see cars with that status and can add new ones. **View Car** replaces the right panel with a resume-style profile (photo URL or placeholder, identity fields, kilometers, notes) while the sidebar stays. All vehicles are cars — there is no truck/van/type taxonomy. Status labels live in the React frontend; car records are stored in SQLite and served by a FastAPI backend.
 
+## Screenshots
+
+### Welcome
+
+![Welcome screen with Add vehicle button](docs/screenshots/welcome.png)
+
+### Status list
+
+![Active cars list with add form and View Car action](docs/screenshots/status-list.png)
+
+### Car profile
+
+![Car profile Basic tab with identity fields and profile tabs](docs/screenshots/car-profile.png)
+
 ## Tech stack
 
 | Layer | Technologies |
